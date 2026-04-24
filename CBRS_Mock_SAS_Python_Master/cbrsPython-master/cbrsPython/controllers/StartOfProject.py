@@ -33,21 +33,21 @@ def add_Log_Of_Test_To_Specific_Folder(loggerHandler):
     the method insure that the question if the test should be added to the folder will be yes or no only
     '''
     loggerHandler.print_To_Terminal(consts.ADD_TEST_TO_SPECIFIC_FOLDER_MESSAGE)
-    insertToFolderAnswer = raw_input().lower()
+    insertToFolderAnswer = input().lower()
     while(insertToFolderAnswer.lower()!="yes" and insertToFolderAnswer.lower()!="no"):
         loggerHandler.print_To_Terminal(consts.ENTER_YES_OR_NO_MESSAGE)
         loggerHandler.print_To_Terminal(consts.ADD_TEST_TO_SPECIFIC_FOLDER_MESSAGE)
-        insertToFolderAnswer = raw_input()
+        insertToFolderAnswer = input()
     return insertToFolderAnswer
 
 def get_input():
     '''
     the method insure that the input will not be an empty line
     '''
-    answer = raw_input()
+    answer = input()
     while not answer:
         loggerHandler.print_To_Terminal(consts.EMPTY_CSV_FILE_NAME_MESSAGE)
-        answer = raw_input()
+        answer = input()
     return answer
 
 def get_Element_From_Config_File(confFile, elementName):
@@ -71,18 +71,18 @@ def run_New_Test(dirPath, confFile, loggerHandler):
             testDefinition = TestDefinition(csvFileParser.initializeTestDefinition(),csvFileParser.find_Number_Of_Cols())
         except IOError as e:  
             ### in case there is file not found error try to enter new csv file name
-            loggerHandler.print_To_Terminal(e.message)
+            loggerHandler.print_To_Terminal(str(e))
             run_New_Test(dirPath, confFile, loggerHandler)
         
         insertToFolderAnswer = add_Log_Of_Test_To_Specific_Folder(loggerHandler)
         if (insertToFolderAnswer == "yes"):
             loggerHandler.print_To_Terminal(consts.TYPE_NAME_OF_FOLDER)
-            insertToFolderAnswer = raw_input()
+            insertToFolderAnswer = input()
             try:
                 loggerHandler.start_Test(inputAnswer, insertToFolderAnswer) 
                 # if decided to enter to folder create two logs one in the all test folder ### if decided to enter to folder create two logs one in the all test folder
             except Exception as E:
-                loggerHandler.print_To_Terminal(E.message)
+                loggerHandler.print_To_Terminal(str(E))
                 run_New_Test(dirPath, confFile, loggerHandler)
             loggerHandler.print_to_Logs_Files(consts.SELECT_TO_ADD_TEST_MESSAGE+ inputAnswer + consts.SELECT_TO_ADD_FOLDER_MESSAGE 
                                                 + insertToFolderAnswer, True)
@@ -94,7 +94,9 @@ def run_New_Test(dirPath, confFile, loggerHandler):
         # initialize cli session handler
         cliHandler.start()
         flaskServer.enodeBController = ENodeBController(cliHandler.engine)       
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2) # use TLS to avoid POODLE
+        #ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.verify_mode = ssl.CERT_REQUIRED
         ctx.set_ciphers(consts.WINNF_APPROVED_CIPHERS)
         ctx.load_verify_locations(os.path.normpath(os.path.join(str(dirPath), get_Element_From_Config_File(confFile,"caCerts"))))

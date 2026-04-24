@@ -13,11 +13,10 @@
 # limitations under the License.
 from flask import Flask,request,jsonify,g,redirect,url_for,abort
 from controllers.ENodeBController import ENodeBController
-import Utils.Consts as consts
+import model.Utils.Consts as consts
 from collections import OrderedDict
 import json
 from controllers.CLIUtils.enums import StepStatus
-from __builtin__ import True
 import flask
 import datetime as DT
 
@@ -59,8 +58,8 @@ def sent_Flask_Req_To_Server(typeOfCalling):
             finalResp.append(x[responseName][0])
     
         if PRINT_MSG_BETWEEN_TESTS == True:
-            print timeNow+" - RECEIVED = " +str(json_dict)
-            print timeNow+" - SENT =  "+str({responseName: finalResp})
+            print(timeNow+" - RECEIVED = " +str(json_dict))
+            print(timeNow+" - SENT =  "+str({responseName: finalResp}))
         return jsonify( {responseName: finalResp})
         
     else:       # old method of canned responses.  To be deprecated...
@@ -77,8 +76,8 @@ def sent_Flask_Req_To_Server(typeOfCalling):
                 for req in json_dict[typeOfCalling+consts.REQUEST_NODE_NAME]:
                     finalResp.append(nonRegistereddata)
                 if PRINT_MSG_BETWEEN_TESTS == True:
-                    print timeNow+" - RECEIVED = " +str(json_dict) 
-                    print timeNow+" - SENT =  "+str({str(typeOfCalling)+"Response": finalResp})
+                    print(timeNow+" - RECEIVED = " +str(json_dict)) 
+                    print(timeNow+" - SENT =  "+str({str(typeOfCalling)+"Response": finalResp}))
                 return jsonify( {str(typeOfCalling)+"Response": finalResp})
             else:
                 finalResp = {str(typeOfCalling)+"Response": [{
@@ -88,8 +87,8 @@ def sent_Flask_Req_To_Server(typeOfCalling):
                                 }]
                              }
                 if PRINT_MSG_BETWEEN_TESTS == True:
-                    print timeNow+" - RECEIVED = " +str(json_dict) 
-                    print timeNow+" - SENT =  "+str(finalResp)
+                    print(timeNow+" - RECEIVED = " +str(json_dict)) 
+                    print(timeNow+" - SENT =  "+str(finalResp))
                 return jsonify(finalResp)
                  
         else:
@@ -103,8 +102,8 @@ def sent_Flask_Req_To_Server(typeOfCalling):
                     allRegisteredData.append(registeredData)
                 finalResp = {str(typeOfCalling)+"Response": allRegisteredData}
                 if PRINT_MSG_BETWEEN_TESTS == True:
-                    print timeNow+" - RECEIVED = " +str(json_dict)
-                    print timeNow+" - SENT =  "+str(finalResp)
+                    print(timeNow+" - RECEIVED = " +str(json_dict))
+                    print(timeNow+" - SENT =  "+str(finalResp))
                 return jsonify( finalResp)
             else:
                 finalResp = {str(typeOfCalling)+"Response": [{
@@ -112,8 +111,8 @@ def sent_Flask_Req_To_Server(typeOfCalling):
                                                 }]
                             }
                 if PRINT_MSG_BETWEEN_TESTS == True:
-                    print timeNow+" - RECEIVED = " +str(json_dict) 
-                    print timeNow+" - SENT =  "+str(finalResp)
+                    print(timeNow+" - RECEIVED = " +str(json_dict)) 
+                    print(timeNow+" - SENT =  "+str(finalResp))
                 return jsonify(finalResp)
 
        

@@ -53,7 +53,7 @@ class CmdLogger(Observer):
     def print_To_Terminal(self,message):
         log = logging.getLogger(consts.CLI_SESSION)
         log.info(message)
-        print message     
+        print(message)     
         
     def print_to_Logs_Files(self, message, isCmdOutput):
         if(isCmdOutput):

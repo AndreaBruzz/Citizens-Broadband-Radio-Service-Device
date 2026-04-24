@@ -65,8 +65,6 @@ def shutdown():
     or send message that all the steps of the current test had been finished and you need to upload a new csv file 
     '''
     app.app_context()
-    func = request.environ.get(consts.NAME_OF_SERVER_WERKZUG)
-    func()
     if("ERROR" in str(request.args['validationMessage'])):
         return abort(400, str(request.args['validationMessage']))
     return consts.SERVER_SHUT_DOWN_MESSAGE + consts.TEST_HAD_BEEN_FINISHED_FLASK
@@ -81,7 +79,7 @@ def stopTestSession(spectrumConf,maxEirp,loggerHandler):
     lock = threading.RLock()
     lock.acquire()
     print('To stop the test session please enter "stop", to get approved spectrum information type "get".')  
-    commandInput = raw_input()
+    commandInput = input()
      
     if commandInput == "get":
         print_final_spectrum_Conf(spectrumConf,maxEirp,loggerHandler) 
@@ -125,7 +123,7 @@ def input_spectrumInfoLow(loggerHandler):
     correctFreq = False
     while correctFreq == False:
         try:
-            frequency = input("please input the start frequency of Cbrs spectrum to be granted (with unit of Mhz): ")
+            frequency = int(input("please input the start frequency of Cbrs spectrum to be granted (with unit of Mhz): "))
             lowEnd = frequency * 1000000
             if lowEnd >= consts.CBRS_SPECTRUM_LOW and lowEnd <= consts.CBRS_SPECTRUM_HIGH:
                 correctFreq = True
@@ -141,9 +139,9 @@ def input_bandwidth_Carrier(lowEndselection,loggerHandler):
     correctBW = False
     while correctBW == False:
         try:
-            BWinput = input("please input the bandwidth of Cbrs spectrum to be granted (with unit of Mhz): ")
-#             numOfCarriers = input("please input the number of carriers to allow to be granted:")
-            numOfCarriers = 1
+            BWinput = int(input("please input the bandwidth of Cbrs spectrum to be granted (with unit of Mhz): "))
+            numOfCarriers = int(input("please input the number of carriers to allow to be granted:"))
+#            numOfCarriers = 1
             specturmConfig =[]
             BWFreqValue = BWinput * 1000000
             highEnd = lowEndselection + BWFreqValue*numOfCarriers
@@ -168,7 +166,7 @@ def input_maxEirp(loggerHandler):
     correctEirp = False
     while correctEirp == False:
         try:
-            eirpInput = input("please input the MaxEirp of Cbrs spectrum to be granted (with unit of dBm/MHz): ")
+            eirpInput = float(input("please input the MaxEirp of Cbrs spectrum to be granted (with unit of dBm/MHz): "))
             if eirpInput <= consts.MAXERIP_HIGH and eirpInput >= consts.MAXEIRP_LOW:
                 correctEirp = True
             else:
@@ -188,7 +186,7 @@ class testSession(Thread):
         Thread.__init__(self)
         self.confFile           = confFile
         self.dirPath            = dirPath
-        self._stop              = threading.Event()
+        self._stop_event        = threading.Event()
         self.loggerHandler      = loggerHandler
         self.spectrumConf       = spectrumConf
         self.maxEirp            = maxEirp
@@ -203,7 +201,7 @@ class testSession(Thread):
         lock. release()           
            
     def stop_Thread_Due_To_Exception(self):
-        self._stop.set()
+        self._stop_event.set()
         
                
 if __name__ == '__main__':  
@@ -233,7 +231,9 @@ if __name__ == '__main__':
     loggerHandler.print_to_Logs_Files(consts.SELECTED_TEST_FROM_USER_MESSAGE + str('PowerMeasTest') + " is starting now", True)
  
     WSGIRequestHandler.protocol_version = "HTTP/1.1"  
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2) # use TLS to avoid POODLE
+    #ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.set_ciphers(consts.WINNF_APPROVED_CIPHERS) 
     ctx.load_verify_locations(os.path.normpath(os.path.join(str(dirPath), get_Element_From_Config_File(confFile,"caCerts"))))

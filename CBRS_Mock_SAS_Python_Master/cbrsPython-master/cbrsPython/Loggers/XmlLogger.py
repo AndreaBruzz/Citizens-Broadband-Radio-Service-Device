@@ -19,7 +19,6 @@ from model.Utils import Consts as consts
 from controllers.CLIUtils.enums import *
 import time
 import calendar
-import commands
 import shutil
  
 class XmlLogger(Observer):
@@ -155,8 +154,8 @@ class XmlLogger(Observer):
             tree = ET.parse(os.path.join(str(dir_Path), "Logs","SpecificFolderOfTests", folder_Name, "xml", folder_Name+"-testsuite"), method=".xml")
 
         except Exception:
-            print "the folder : " + folder_Name + " , does not contains xml file you wish to delete it (enter yes or no) " 
-            inputAnswer=raw_input()
+            print("the folder : " + folder_Name + " , does not contains xml file you wish to delete it (enter yes or no) ") 
+            inputAnswer=input()
             if(inputAnswer == "yes"):
                 os.rmdir(os.path.join(str(dir_Path), "Logs","SpecificFolderOfTests", folder_Name, "xml"))
                 os.rmdir(os.path.join(str(dir_Path), "Logs", "SpecificFolderOfTests", folder_Name, "fireFox"))

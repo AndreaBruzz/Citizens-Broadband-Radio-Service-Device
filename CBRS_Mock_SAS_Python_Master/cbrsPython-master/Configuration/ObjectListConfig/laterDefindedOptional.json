@@ -29,7 +29,7 @@
     "description": "Air interface parameter for a CBSD",
     "required": [ "radioTechnology" ],
     "properties": {
-      "radioTechnology": { "enum": [ "E_UTRA", "CAMBIUM_NETWORKS" ],
+      "radioTechnology": { "enum": [ "E_UTRA", "CAMBIUM_NETWORKS", "NR" ],
                            "description": "Which PHY radio technology is used by the device in the 3.5GHz band" }
     		}
 	    }

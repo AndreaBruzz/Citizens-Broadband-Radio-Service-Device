@@ -55,7 +55,7 @@ class CsvFileParser(object):
         try:
             with open(self.csvFileName+".csv") as csvfile:
                 reader = csv.DictReader(csvfile)
-                return len(reader.next())
+                return len(next(reader))
         except:
             raise IOError("the file " + self.csvFileName + " not found")
         

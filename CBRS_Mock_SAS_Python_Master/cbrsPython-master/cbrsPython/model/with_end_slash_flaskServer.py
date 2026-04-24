@@ -13,11 +13,10 @@
 # limitations under the License.
 from flask import Flask,request,jsonify,g,redirect,url_for,abort
 from controllers.ENodeBController import ENodeBController
-import Utils.Consts as consts
+import model.Utils.Consts as consts
 from collections import OrderedDict
 import json
 from controllers.CLIUtils.enums import StepStatus
-from __builtin__ import True
 import flask
 
 
@@ -104,8 +103,6 @@ def shutdown():
     '''
     logger = enodeBController.engine.loggerHandler
     app.app_context()
-    func = request.environ.get(consts.NAME_OF_SERVER_WERKZUG)
-    func()
     if("ERROR" in str(request.args['validationMessage'])):
         logger.finish_Step("the server shot down because :  " + str(request.args['validationMessage']),False,StepStatus.FAILED)
         return abort(400, str(request.args['validationMessage']))

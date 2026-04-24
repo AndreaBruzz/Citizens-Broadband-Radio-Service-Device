@@ -49,7 +49,7 @@ class MyEngine(object):
                     self.add_Cbrs_Obj(httpReq["cbsdSerialNumber"])
                 except Exception as E:
                     self.validationErrorAccuredInEngine = True
-                    return E.message
+                    return str(E)
                 try:
                     if(i==0):
                         response = self.handle_Http_Req(httpReq["cbsdSerialNumber"],httpReq,typeOfCalling, request_arrival_time)
@@ -60,7 +60,7 @@ class MyEngine(object):
                         response[nodeResponse].append(tempResp[nodeResponse][0])
                 except Exception as E:
                     self.validationErrorAccuredInEngine = True
-                    return "for the CBRS with the cbsdSerialNumber :" + str(httpReq["cbsdSerialNumber"]) + " " +  E.message
+                    return "for the CBRS with the cbsdSerialNumber :" + str(httpReq["cbsdSerialNumber"]) + " " +  str(E)
                     
                     
             else:
@@ -79,7 +79,7 @@ class MyEngine(object):
                         response[nodeResponse].append(tempResp[nodeResponse][0])               
                 except Exception as E:
                     self.validationErrorAccuredInEngine = True
-                    return E.message
+                    return str(E)
             i+=1
         if(len(self.cbrsObjArray) == len(self.testDefinition.jsonNamesOfSteps)):
             self.allTheCBRSRegistered = True

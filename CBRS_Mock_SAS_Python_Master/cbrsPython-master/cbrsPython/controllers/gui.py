@@ -11,10 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from Tkinter import *
+from tkinter import *
 from PIL import ImageTk, Image
 from model.Utils import Consts as consts
-import tkMessageBox
+from tkinter import messagebox
 import random
 import os
 import time
@@ -35,7 +35,7 @@ class GUIFramework(Frame):
     def Create_Open_Widget(self):
         path = "C:/Users/iagmon/Downloads/airspan-logo.jpg"
         pilImage = Image.open(path)
-        image200x100 = pilImage.resize((100, 100), Image.ANTIALIAS)
+        image200x100 = pilImage.resize((100, 100), Image.LANCZOS)
         img = ImageTk.PhotoImage(image200x100)
         panel = Label(self, image = img)
         panel.image = img

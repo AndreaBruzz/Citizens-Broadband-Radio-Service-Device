@@ -22,7 +22,6 @@ import jsonschema
 from collections import OrderedDict
 import jwt
 from cryptography.x509 import load_pem_x509_certificate
-from cryptography.hazmat.backends import default_backend
 
 
 class RequestHandler(object):
@@ -97,7 +96,7 @@ class RequestHandler(object):
         '''        
         check if the key is optional means its not in the expected json but it is in the requests and its allowed in the protocol 
         '''
-        for key, value in httpRequest.iteritems(): 
+        for key, value in httpRequest.items(): 
             if key in optional_laterDefined["properties"]:
                 try:
                     jsonschema.validate(OrderedDict([(key, value)]), optional_laterDefined)                    
@@ -121,15 +120,14 @@ class RequestHandler(object):
         try:
             return jsonComparer.get_Node_Of_Json_Parsed(jsonFileName,nodeName,confFile,self.dirPath)
         except Exception as e:
-            if e.message == "node not exists":
-                return consts.SUFFIX_NOT_EXISTS_IN_EXPECTED_JSON_FILE
+            return consts.SUFFIX_NOT_EXISTS_IN_EXPECTED_JSON_FILE
   
     def process_response(self,typeOfCalling,httpRequest, responseFile): 
         jsonAfterParse = self.parse_Json_To_Dic_By_File_Name(responseFile,consts.RESPONSE_NODE_NAME,self.enviormentConfFile)
         if len(jsonAfterParse) > 1:
-            for item in jsonAfterParse.iteritems():
-                if item[0] != typeOfCalling+consts.RESPONSE_NODE_NAME.title():
-                    del jsonAfterParse[item[0]]            
+            keys_to_delete = [k for k in jsonAfterParse if k != typeOfCalling+consts.RESPONSE_NODE_NAME.title()]
+            for k in keys_to_delete:
+                del jsonAfterParse[k]            
         specificRespJson = jsonAfterParse[typeOfCalling+consts.RESPONSE_NODE_NAME.title()][0]      
         
         if(typeOfCalling == consts.REGISTRATION_SUFFIX_HTTP):
@@ -291,6 +289,8 @@ class RequestHandler(object):
     def processGrantResponse(self,jsonResponsedefined,httpRequest):  
         
         grantResp = jsonResponsedefined          
+        lF = self.spectrumConf[0]["lowFrequency"]  
+        hF = self.spectrumConf[0]["highFrequency"] 
         if 'cbsdId' not in httpRequest or 'operationParam' not in httpRequest \
                     or 'operationFrequencyRange' not in httpRequest['operationParam']:
             self.validationRequestDataError = True
@@ -316,9 +316,11 @@ class RequestHandler(object):
         else: 
             FreqInRange = False
             for i in range(len(self.spectrumConf)):
-                if httpRequest['operationParam']['operationFrequencyRange']['lowFrequency'] == self.spectrumConf[i]["lowFrequency"] and \
-                        httpRequest['operationParam']['operationFrequencyRange']['highFrequency'] == self.spectrumConf[i]["highFrequency"]:
+                if httpRequest['operationParam']['operationFrequencyRange']['lowFrequency'] >= self.spectrumConf[i]["lowFrequency"] and \
+                        httpRequest['operationParam']['operationFrequencyRange']['highFrequency'] <= self.spectrumConf[i]["highFrequency"]:
                     FreqInRange = True
+                    lF = self.spectrumConf[i]["lowFrequency"]
+                    hF = self.spectrumConf[i]["highFrequency"] 
                     if(httpRequest['operationParam']['maxEirp']> self.currentGrantEIRP):
 #                        self.validationRequestDataError = True                        
                         responseResult = {"responseCode" : 400}
@@ -357,15 +359,22 @@ class RequestHandler(object):
                                  
         if(grantResp["response"]["responseCode"] !=0):
 #            newAvailableChannel = []
-            for i in range(len(self.spectrumConf)):
-                ## NOTE: this only works for len(self.spectrumConf = 1), protocol does not allow array of operationParam
-                newResponseChannel ={}
-                newResponseChannel["operationFrequencyRange"] = {}
-                newResponseChannel["operationFrequencyRange"]["highFrequency"]=self.spectrumConf[i]["highFrequency"]
-                newResponseChannel["operationFrequencyRange"]["lowFrequency"]=self.spectrumConf[i]["lowFrequency"]
-                newResponseChannel["maxEirp"]=self.currentGrantEIRP
+#            for i in range(len(self.spectrumConf)):
+#                ## NOTE: this only works for len(self.spectrumConf = 1), protocol does not allow array of operationParam
+#                newResponseChannel ={}
+#                newResponseChannel["operationFrequencyRange"] = {}
+#                newResponseChannel["operationFrequencyRange"]["highFrequency"]=self.spectrumConf[i]["highFrequency"]
+#                newResponseChannel["operationFrequencyRange"]["lowFrequency"]=self.spectrumConf[i]["lowFrequency"]
+#                newResponseChannel["maxEirp"]=self.currentGrantEIRP
                          
 #                newAvailableChannel.append(newResponseChannel)
+
+            newResponseChannel ={}
+            newResponseChannel["operationFrequencyRange"] = {}
+            newResponseChannel["operationFrequencyRange"]["highFrequency"] = hF
+            newResponseChannel["operationFrequencyRange"]["lowFrequency"] = lF
+            newResponseChannel["maxEirp"]=self.currentGrantEIRP
+
             self.change_Value_Of_Param_In_Dict(jsonResponsedefined, "operationParam", newResponseChannel)
             self.loggerHandler.print_to_Logs_Files('The Grant response code is not 0, applicable spectrum parameters have been sent out.', True)                                                  
   

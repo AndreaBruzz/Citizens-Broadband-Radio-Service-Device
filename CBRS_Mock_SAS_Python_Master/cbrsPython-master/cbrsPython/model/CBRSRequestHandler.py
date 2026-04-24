@@ -23,7 +23,6 @@ import json
 import jsonschema
 import jwt
 from cryptography.x509 import load_pem_x509_certificate
-from cryptography.hazmat.backends import default_backend
 import base64
 
 
@@ -283,7 +282,7 @@ class CBRSRequestHandler(object):
         try:
             return jsonComparer.get_Node_Of_Json_Parsed(jsonFileName,nodeName,confFile,self.dirPath)
         except Exception as e:
-            if e.message == "node not exists":
+            if str(e) == "node not exists":
                 return consts.SUFFIX_NOT_EXISTS_IN_EXPECTED_JSON_FILE
     
     def get_Expected_Json_File_Name(self,numberOfStep = None):
@@ -321,9 +320,9 @@ class CBRSRequestHandler(object):
         jsonAfterParse = self.parse_Json_To_Dic_By_File_Name(self.get_Expected_Json_File_Name(),consts.RESPONSE_NODE_NAME,self.enviormentConfFile)
         
         if len(jsonAfterParse) > 1:
-            for item in jsonAfterParse.iteritems():
-                if item[0] != typeOfCalling+consts.RESPONSE_NODE_NAME.title():
-                    del jsonAfterParse[item[0]]
+            keys_to_delete = [k for k in jsonAfterParse if k != typeOfCalling+consts.RESPONSE_NODE_NAME.title()]
+            for k in keys_to_delete:
+                del jsonAfterParse[k]
         specificRespJson = jsonAfterParse[typeOfCalling+consts.RESPONSE_NODE_NAME.title()][0]
         
         if 'measReportConfig' in specificRespJson:
@@ -508,12 +507,12 @@ class CBRSRequestHandler(object):
         encoded_cpi_data = cpiSigData['protectedHeader'] \
                         + '.' + cpiSigData['encodedCpiSignedData'] \
                         + '.' + cpiSigData['digitalSignature']
-        unverified_cpi_payload = jwt.decode(encoded_cpi_data, verify=False)     ### This is data without signature check
+        unverified_cpi_payload = jwt.decode(encoded_cpi_data, options={"verify_signature": False}, algorithms=consts.CPI_SIGNATURE_VALID_TYPES)     ### This is data without signature check
         self.loggerHandler.print_to_Logs_Files("encodedCpiSignedData contents = "+json.dumps(unverified_cpi_payload, indent=4), False)
         try:
             cpi_cert_filename = os.path.normpath(os.path.join(str(self.dirPath), str(self.enviormentConfFile.getElementsByTagName('cpiCert')[0].firstChild.data)))
-            cpi_cert = open(cpi_cert_filename, 'r').read()
-            cpi_cert_obj = load_pem_x509_certificate(cpi_cert, default_backend())
+            cpi_cert = open(cpi_cert_filename, 'rb').read()
+            cpi_cert_obj = load_pem_x509_certificate(cpi_cert)
             cpi_public_key = cpi_cert_obj.public_key()
         except:
             self.loggerHandler.print_to_Logs_Files('Error in loading CPI certificate file', True)
