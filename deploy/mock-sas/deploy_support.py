@@ -6,10 +6,12 @@ import hashlib
 import http.client
 import ipaddress
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
+import shutil
 import socket
 import ssl
+import tarfile
 import time
 
 from cryptography import x509
@@ -17,7 +19,6 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 import jsonschema
 
-from app import DEVICE_SCHEMA
 from lab_protocol import DEFAULT_PROFILE, POSITIVE_PROFILE, PROFILES, read_policy
 from lab_state import StateStoreError, read_snapshot
 
@@ -30,7 +31,11 @@ def ca_certificates(path):
         raise ValueError(f"{path}: expected only public PEM certificates, no keys or other content")
     certificates = [x509.load_pem_x509_certificate(block) for block in blocks]
     for cert in certificates:
-        if not cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+        try:
+            is_ca = cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
+        except x509.ExtensionNotFound as error:
+            raise ValueError(f"{path}: CA certificate is missing BasicConstraints") from error
+        if not is_ca:
             raise ValueError(f"{path}: bundle contains a non-CA certificate")
     return certificates
 
@@ -50,6 +55,56 @@ def write_preserving(path, data):
     path.chmod(0o600)
 
 
+def package_files(root):
+    files = json.loads((Path(root) / "deploy/mock-sas/package-files.json").read_text())
+    if (not isinstance(files, list) or not files or
+            not all(isinstance(name, str) for name in files) or len(set(files)) != len(files)):
+        raise ValueError("Package allowlist must be a nonempty unique list")
+    for name in files:
+        if (not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9_./-]+", name) or
+                PurePosixPath(name).is_absolute() or
+                any(part in ("", ".", "..") for part in name.split("/"))):
+            raise ValueError("Unsafe package allowlist path")
+        source = Path(root) / name
+        if not source.is_file() or source.is_symlink():
+            raise ValueError("Package source is missing or a symlink: " + name)
+    return files
+
+
+def build_package(root, directory, client_ca, expected_root, radio_bundle=None, lab_policy=None):
+    """Use the same source allowlist and content manifest as the Windows launcher."""
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_root or ""):
+        raise ValueError("An explicit verified root SHA256 is required")
+    if expected_root.lower() not in fingerprints(ca_certificates(client_ca)):
+        raise ValueError("Client CA does not contain the expected radio root SHA256 fingerprint")
+    if radio_bundle:
+        ca_certificates(radio_bundle)
+    if lab_policy:
+        read_policy(lab_policy)
+    files = package_files(root)
+    stage = Path(directory) / "source"
+    stage.mkdir(mode=0o700)
+    for name in files:
+        destination = stage / name
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        shutil.copyfile(Path(root) / name, destination)
+    inputs = stage / "inputs"
+    inputs.mkdir(mode=0o700)
+    for name, source in (("client-ca.pem", client_ca), ("radio-trust-bundle.pem", radio_bundle),
+                         ("lab-policy.json", lab_policy)):
+        if source:
+            shutil.copyfile(source, inputs / name)
+    entries = sorted(path for path in stage.rglob("*") if path.is_file())
+    manifest = "".join(hashlib.sha256(path.read_bytes()).hexdigest() + "  " +
+                       path.relative_to(stage).as_posix() + "\n" for path in entries).encode()
+    (stage / "package.sha256").write_bytes(manifest)
+    archive = Path(directory) / "package.tar"
+    with tarfile.open(archive, "w") as output:
+        for path in sorted(stage.rglob("*")):
+            output.add(path, arcname="./" + path.relative_to(stage).as_posix(), recursive=False)
+    return archive, hashlib.sha256(archive.read_bytes()).hexdigest(), hashlib.sha256(manifest).hexdigest()
+
+
 def validate_pair(cert_path, key_path):
     cert = x509.load_pem_x509_certificate(Path(cert_path).read_bytes())
     key = serialization.load_pem_private_key(Path(key_path).read_bytes(), password=None)
@@ -66,6 +121,8 @@ def prepare(credentials, settings_path, output, server_ip, port, mutual_tls,
             client_ca=None, expected_root=None, radio_trust_bundle=None, fresh=False,
             check_permissions=False, profile=DEFAULT_PROFILE, lab_policy=None,
             state_version=1, operator_control=False, state_directory=None):
+    from app import DEVICE_SCHEMA
+
     credentials, output = Path(credentials), Path(output)
     if profile not in PROFILES:
         raise ValueError("Unsupported deployment profile")

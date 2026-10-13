@@ -27,6 +27,11 @@ copy any material automatically.
 Automatic deployment downloads are public-only. A previously transferred or
 locally generated signer key remains at its existing private operator location;
 the catalog does not export another one. No P12/password is supplied publicly.
+For a new SSH deployment, the root-only server signer location is
+`INSTALL_DIRECTORY/mock-sas-lab/signer/cpi-key.pem`, separate from the pinned
+public `runtime/cpi-cert.pem`. The interactive wizards never download that key.
+Any necessary secure transfer to protected signing-software storage is separate,
+explicitly approved operator work; no radio/server/CA private key is exported.
 
 If you want local copies of the two public LAB certificates in `existing`,
 protect the directory first: Windows noninherited DACL for current user + SYSTEM

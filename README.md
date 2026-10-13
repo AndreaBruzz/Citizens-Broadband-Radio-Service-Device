@@ -19,6 +19,28 @@ no authorization here for real/public-network transmission.
 
 ## Quickstart: registration-only isolated LAB
 
+For guided upload/start on an existing Linux server, use either operator-side
+wizard after setting up the local Python environment in the
+[deployment guide](deploy/mock-sas/README.md#interactive-deployment-windows-and-linux):
+
+```powershell
+.\deploy\mock-sas\Deploy-MockSas-Wizard.ps1
+```
+
+```sh
+bash deploy/mock-sas/deploy-mock-sas-wizard.sh
+```
+
+Both default to **offline packaging**, require verified public client CA/root
+fingerprint, and request explicit confirmation before deployment. Deployment
+also requires independently verified SSH host keys and an existing root SSH
+login/agent or private identity file. Neither wizard installs Docker, changes
+firewalls, replaces credentials or downloads private signer keys. The server
+must already provide rootful Linux Docker and Compose v2. See the guide for
+prerequisites, inputs, cancellation and advanced noninteractive/manual setup.
+
+For manual container startup instead of SSH deployment:
+
 Requires Linux Docker Engine/Compose v2 and a reviewed server DNS/IP.
 The following non-root example generates **new test credentials**, never replaces
 existing material, and leaves positive mode disabled:
@@ -99,7 +121,10 @@ The newer response-contract/operator-control changes have local synthetic
 regression coverage; this public snapshot's Linux image/Gunicorn/UID 10001 IPC
 checks have not yet been run. See the guide for the runners and skipped-check
 interpretation; local tests do not authorize deployment or live negative events.
-The sanitized Windows suite ran 156 tests: 152 passed and four Linux-only checks
+The interactive wizards have local synthetic/mocked-transport coverage only;
+neither the new wizards nor a new Linux image have been deployed to a real server
+as part of this feature.
+The Windows suite including wizard tests ran 175 tests: 171 passed and four Linux-only checks
 were skipped. Shipped Python/PowerShell/Bash syntax and public-only package checks
 also passed.
 

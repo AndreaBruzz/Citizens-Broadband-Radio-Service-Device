@@ -164,39 +164,16 @@ function Protect-Output([string]$Directory) {
 try {
     $stage = Join-Path $work 'source'
     [void](New-Item -ItemType Directory -Path $stage)
-    $files = @(
-        '.dockerignore', 'Dockerfile.mock-sas', 'compose.mock-sas.yml', 'LICENSE',
-        'compose.mock-sas.lab-positive.yml',
-        'deploy\mock-sas\app.py', 'deploy\mock-sas\gunicorn.conf.py',
-        'deploy\mock-sas\lab_protocol.py',
-        'deploy\mock-sas\lab_state.py',
-        'deploy\mock-sas\operator_control.py',
-        'deploy\mock-sas\offline-image-check.py', 'deploy\mock-sas\offline-image-check.sh',
-        'deploy\mock-sas\test_lab.py', 'deploy\mock-sas\lab-certificates\README.md',
-        'deploy\mock-sas\response_contracts.json', 'deploy\mock-sas\lab-positive.example.json',
-        'deploy\mock-sas\generate_lab.py', 'deploy\mock-sas\deploy_support.py',
-        'deploy\mock-sas\requirements.txt',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\cbrsPython\model\__init__.py',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\cbrsPython\model\CBRSRequestHandler.py',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\cbrsPython\model\Utils\__init__.py',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\cbrsPython\model\Utils\Assert.py',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\cbrsPython\model\Utils\Consts.py',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\cbrsPython\model\Utils\JsonComparisonUtils.py',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\Configuration\conf.xml',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\Configuration\CBSDconfig\cbsdc1.xml',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\Configuration\ObjectListConfig\laterDefindedOptional.json',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\jsonExpectedFolder\REG_SingleStep_CPI_Success_cbsd1.json',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\jsonExpectedFolder\OptionalParams\registrationOptional.json',
-        'CBRS_Mock_SAS_Python_Master\cbrsPython-master\jsonExpectedFolder\OptionalParams\cpiSignatureDataSchema.json'
-    )
-    foreach ($operation in @('spectrumInquiry', 'grant', 'heartbeat', 'relinquishment', 'deregistration')) {
-        $files += "CBRS_Mock_SAS_Python_Master\cbrsPython-master\jsonExpectedFolder\OptionalParams\${operation}Optional.json"
-    }
-    foreach ($scenario in @('HBT_spectrumInquiry_Cbsd', 'HBT_grant_Cbsd', 'HBT_heartbeat_GrantedState',
-                            'RLQ_relinquish_success', 'DRG_Success')) {
-        $files += "CBRS_Mock_SAS_Python_Master\cbrsPython-master\jsonExpectedFolder\$scenario.json"
+    $files = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'package-files.json') -Raw | ConvertFrom-Json
+    if ($files -isnot [array] -or $files.Count -eq 0 -or @($files | Select-Object -Unique).Count -ne $files.Count) {
+        throw 'The package allowlist is empty or contains duplicates.'
     }
     foreach ($relative in $files) {
+        if ($relative -isnot [string] -or $relative -notmatch '^[a-zA-Z0-9_./-]+$' -or $relative.StartsWith('/') -or
+            @($relative.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -gt 0) {
+            throw 'Unsafe package allowlist path.'
+        }
+        $relative = $relative.Replace('/', '\')
         $source = Join-Path $repo $relative
         $item = Get-Item -LiteralPath $source
         if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
@@ -258,7 +235,8 @@ try {
     }
     if ($KnownHostsFile) {
         $knownHosts = (Resolve-Path -LiteralPath $KnownHostsFile).Path
-        $hostOptions = @('-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts")
+        if ($knownHosts -match '["%$\r\n]') { throw 'Unsupported known_hosts path characters or OpenSSH expansion tokens.' }
+        $hostOptions = @('-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=`"$knownHosts`"")
         $sshArgs += $hostOptions
         $scpArgs += $hostOptions
     }

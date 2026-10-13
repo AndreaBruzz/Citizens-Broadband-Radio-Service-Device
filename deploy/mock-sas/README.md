@@ -127,6 +127,105 @@ cannot enable `lab-positive` and is not equivalent to WInnForum mTLS testing.
 
 ## Windows deployment launcher
 
+### Interactive deployment: Windows and Linux
+
+The two operator-side entry points share one English prompt/validation flow and
+the same allowlisted package manifest. PowerShell delegates the confirmed inputs
+to `Deploy-MockSas.ps1`; native Linux transport sends the **same**
+`deploy-server.sh` payload. No alternate Docker/Compose ownership, port-selection
+or credential pipeline is introduced.
+
+Local prerequisites: supported Python 3 with the existing pinned
+`deploy/mock-sas/requirements.txt`, Windows PowerShell 5.1+ or Linux Bash,
+and OpenSSH `ssh`, `scp`, `ssh-keygen` for deployment. The Windows backend also
+requires `tar`. No Docker daemon is needed on the operator machine. Create the
+local environment once, then start the appropriate wizard from any directory:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r .\deploy\mock-sas\requirements.txt
+.\deploy\mock-sas\Deploy-MockSas-Wizard.ps1
+.\deploy\mock-sas\Deploy-MockSas-Wizard.ps1 -Help
+```
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r deploy/mock-sas/requirements.txt
+bash deploy/mock-sas/deploy-mock-sas-wizard.sh
+bash deploy/mock-sas/deploy-mock-sas-wizard.sh --help
+```
+
+Setup commands are from the checkout root; entry points resolve their own
+location. Override the interpreter with PowerShell `-Python PATH_TO_PYTHON`, or
+Linux `PYTHON=/path/to/venv/bin/python`. Help requires no dependency environment or
+SSH connection. Never put SSH/CPI/P12 passwords in environment overrides.
+
+The wizard collects an actual **IPv4** HTTPS SAN/address (the existing SSH
+pipeline does not provision DNS/IPv6 SANs), `root@HOST` SSH destination and port,
+an optional existing private identity file or agent, and a previously verified
+`known_hosts` file. DNS names are supported for the SSH target, not automatically
+resolved into an invented HTTPS address. Paths with spaces are supported.
+The known-host entry must match the exact SSH host/port, including hashed entries;
+the operator must independently confirm its provenance. No unverified
+`ssh-keyscan`, disabled host checking or automatic trust enrollment occurs.
+OpenSSH itself handles any private-key passphrase; the wizard never asks for,
+stores or prints it.
+
+Client CA inputs must contain only public CA certificates and include the
+**explicit independently verified root SHA256**. mTLS is mandatory in both
+wizards. An optional original radio CA bundle is preserved in the merged public
+export; keep every original CA. No private radio/server/CA key is requested.
+The advanced launcher retains its separately acknowledged registration-only
+no-client-certificate mode; the wizard deliberately does not offer it.
+
+Blank HTTPS port preserves an owned deployment's port, or initially searches
+8443-8542. An entered port is strict; nothing occupying it is stopped.
+The default installation directory is `/opt/winnf-mock-sas-lab`; a dedicated
+validated `/opt` or `/srv` path determines the existing project scope.
+The default profile is implicit registration-only: existing positive deployments
+cannot be silently downgraded. Select the actual existing profile when rerunning.
+Keys, settings and durable state are preserved; differing inputs fail rather
+than trigger regeneration, lease extension or silent migration.
+
+For explicit `lab-positive`, the entire policy schema and both acknowledgments
+are checked, its bounds are displayed, and the operator must type `RF-CONTAINED`.
+Simulated AUTHORIZED responses **may cause radio transmission**: require verified
+isolation in a properly RF-shielded anechoic chamber. Anechoic treatment alone
+is not shielding or SAS authority. State version must match existing state;
+v1-to-v2 migration remains separate stopped-worker maintenance.
+Operator controls default to disabled and require separate explicit v2 consent;
+enabling the socket fires no event.
+
+All inputs are validated before the final summary. Type `PACKAGE` for an
+offline public-input package, or `DEPLOY` for actual server preflight/upload/start.
+Blank/decline, `cancel`, EOF or Ctrl+C **before confirmation** yields cancellation
+and no deployment/upload/output changes. Interruption **after confirmation**
+cannot undo an already started deployment: inspect the owned service/settings
+before retrying. Backend failure is nonzero and never reported as success.
+
+Deployment requires the already working rootful local Linux Docker/Compose v2
+host described below. It builds natively on that server and starts only the
+owned service with `--no-deps`; no dependency installation, firewall change,
+other-stack restart, private credential download or radio/RF action is built in.
+Outputs use a protected dedicated local directory and are public-only:
+server CA, CPI certificate, optional complete radio+LAB bundle and public
+device/deployment metadata. **Public does not mean publish your device metadata
+to GitHub**; these operator-specific files remain ignored/private locally.
+
+New deployment signer material resides in the server's root-only
+`INSTALL_DIRECTORY/mock-sas-lab/signer/cpi-key.pem`; the matching pinned public
+certificate is under `runtime/cpi-cert.pem`. Use the existing signer key when
+signing again. Any deliberate secure CPI-key transfer to protected signer
+storage is separate approved operator work, never automatic wizard/export
+behavior. Do not transfer radio, server TLS or CA private keys.
+See the [certificate catalog](lab-certificates/README.md).
+
+Only local synthetic input, package and mocked-transport tests have exercised
+these new wizards. They and the newer Linux image have **not** been deployed by
+this feature; earlier evidence with one 5G small cell does not verify them.
+
+### Advanced noninteractive Windows launcher
+
 `Deploy-MockSas.ps1` uses Windows PowerShell 5.1+, OpenSSH and tar.
 **Running it without `-PackageOnly` performs deployment.** It requires an
 explicit `-ServerIp`; mTLS also requires an explicit verified
