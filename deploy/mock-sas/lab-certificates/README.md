@@ -49,6 +49,8 @@ current-user/SYSTEM DACL as in the launcher's `Protect-Output`; Python `chmod`
 does not guarantee Windows ACLs. Do not run the deployment launcher to organize
 files. On Linux use 0700 and `umask 077`.
 
+Set up the local Python environment as described in the
+[deployment guide](../README.md#checks-and-interpretation).
 From the checkout root, after protecting the empty directory:
 
 ```powershell
