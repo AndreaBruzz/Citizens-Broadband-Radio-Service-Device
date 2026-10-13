@@ -1,0 +1,14 @@
+services:
+  mock-sas:
+    labels:
+      org.winnf.mock-sas.profile: lab-positive
+    environment:
+      SAS_PROFILE: lab-positive
+      SAS_REQUIRE_CLIENT_CERT: "true"
+      SAS_LAB_POLICY: /lab-policy.json
+      SAS_STATE_DIRECTORY: /state
+      SAS_STATE_VERSION: "${SAS_STATE_VERSION:-1}"
+      SAS_OPERATOR_CONTROL_ENABLED: "${SAS_OPERATOR_CONTROL_ENABLED:-false}"
+    volumes:
+      - ./inputs/lab-policy.json:/lab-policy.json:ro
+      - ./lab-state:/state:rw

@@ -1,0 +1,26 @@
+services:
+  mock-sas:
+    image: "${SAS_IMAGE:-winnf-mock-sas-lab:local}"
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-sas
+    user: "${SAS_RUN_UID:-10001}:${SAS_RUN_GID:-10001}"
+    labels:
+      org.winnf.mock-sas.profile: registration-cpi-only
+      org.winnf.mock-sas.deployment: "${SAS_DEPLOYMENT_ID:-manual}"
+    ports:
+      - "${SAS_BIND_ADDRESS:-0.0.0.0}:${SAS_HTTPS_PORT:-8443}:8443"
+    environment:
+      SAS_REQUIRE_CLIENT_CERT: "${SAS_REQUIRE_CLIENT_CERT:-true}"
+    volumes:
+      - ./mock-sas-lab/config:/config:ro
+      - ./mock-sas-lab/runtime:/credentials:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 15s

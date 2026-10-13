@@ -1,0 +1,26 @@
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    SAS_SOURCE=/opt/mock-sas
+
+WORKDIR /opt/lab
+COPY deploy/mock-sas/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+    && useradd --uid 10001 --create-home lab
+
+COPY CBRS_Mock_SAS_Python_Master/cbrsPython-master/cbrsPython/model/__init__.py /opt/mock-sas/cbrsPython/model/
+COPY CBRS_Mock_SAS_Python_Master/cbrsPython-master/cbrsPython/model/CBRSRequestHandler.py /opt/mock-sas/cbrsPython/model/
+COPY CBRS_Mock_SAS_Python_Master/cbrsPython-master/cbrsPython/model/Utils/ /opt/mock-sas/cbrsPython/model/Utils/
+COPY CBRS_Mock_SAS_Python_Master/cbrsPython-master/Configuration/ /opt/mock-sas/Configuration/
+COPY CBRS_Mock_SAS_Python_Master/cbrsPython-master/jsonExpectedFolder/ /opt/mock-sas/jsonExpectedFolder/
+COPY deploy/mock-sas/app.py deploy/mock-sas/gunicorn.conf.py deploy/mock-sas/generate_lab.py ./
+COPY deploy/mock-sas/deploy_support.py ./
+COPY deploy/mock-sas/lab_protocol.py ./
+COPY deploy/mock-sas/lab_state.py ./
+COPY deploy/mock-sas/operator_control.py ./
+COPY LICENSE /opt/mock-sas/LICENSE
+
+USER 10001:10001
+EXPOSE 8443
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:create_app()"]

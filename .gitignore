@@ -1,0 +1,12 @@
+mock-sas-lab/
+.venv/
+__pycache__/
+*.pyc
+*.p12
+*.pfx
+mock-sas-image.tar
+mock-sas-deploy-output/
+inputs/
+lab-state/
+deploy/mock-sas/lab-certificates/**
+!deploy/mock-sas/lab-certificates/README.md
