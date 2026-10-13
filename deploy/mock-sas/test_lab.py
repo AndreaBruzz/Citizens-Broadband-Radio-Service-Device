@@ -1983,10 +1983,463 @@ class ES256PositiveTests(PositiveTests):
     algorithm = "ES256"
 
 
+class PackagingTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "PowerShell Windows launcher test")
+    def test_positive_package_has_explicit_policy_and_no_client_cert_fallback(self):
+        with tempfile.TemporaryDirectory(prefix="mock-sas-positive-package-") as temporary:
+            directory = Path(temporary)
+            generate(directory / "fixture", [], ["127.0.0.1"])
+            ca = directory / "fixture/signer/server-ca.pem"
+            policy = json.loads(Path(__file__).with_name("lab-positive.example.json").read_text())
+            path = directory / "policy.json"
+            path.write_text(json.dumps(policy))
+            command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                       str(Path(__file__).with_name("Deploy-MockSas.ps1")),
+                       "-PackageOnly", "-ServerIp", "127.0.0.1", "-Profile", POSITIVE_PROFILE,
+                       "-LabPositiveConfig", str(path), "-ClientCa", str(ca),
+                       "-ClientRootSha256", next(iter(fingerprints(ca_certificates(ca)))),
+                       "-OutputDirectory", str(directory / "output")]
+            denied = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn("acknowledgments", denied.stderr)
+            policy.update(labOnlyAcknowledged=True, rfContainmentAcknowledged=True)
+            path.write_text(json.dumps(policy))
+            accepted = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+            self.assertIn("no SSH connection", accepted.stdout)
+            with tarfile.open(next((directory / "output").glob("*.tar"))) as archive:
+                names = {name.removeprefix("./") for name in archive.getnames()}
+                for expected in ("inputs/lab-policy.json", "compose.mock-sas.lab-positive.yml",
+                                 "deploy/mock-sas/lab_protocol.py"):
+                    self.assertIn(expected, names)
+                for operation in ("spectrumInquiry", "grant", "heartbeat", "relinquishment", "deregistration"):
+                    self.assertIn("CBRS_Mock_SAS_Python_Master/cbrsPython-master/jsonExpectedFolder/"
+                                  f"OptionalParams/{operation}Optional.json", names)
+            no_client = command[:]
+            index = no_client.index("-ClientCa")
+            del no_client[index:index + 2]
+            index = no_client.index("-ClientRootSha256")
+            del no_client[index:index + 2]
+            no_client.append("-AllowNoClientCertificate")
+            denied = subprocess.run(no_client, capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn("requires mTLS", denied.stderr)
+    @unittest.skipUnless(os.name == "nt", "PowerShell Windows transport test")
+    def test_windows_payload_transport_has_valid_bash_syntax(self):
+        bash = Path(os.environ["ProgramFiles"]) / "Git/bin/bash.exe"
+        if not bash.exists():
+            self.skipTest("Git Bash unavailable")
+        script = Path(__file__).with_name("deploy-server.sh")
+        command = (
+            f"$payload = [IO.File]::ReadAllText('{script}').Replace(\"`r\", ''); "
+            f"($payload + \"`n# End of payload\") | & '{bash}' -n; exit $LASTEXITCODE"
+        )
+        result = subprocess.run(["powershell", "-NoProfile", "-Command", command],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_image_copy_sources_exist_and_do_not_include_old_credentials(self):
+        root = Path(__file__).resolve().parents[2]
+        files = []
+        for line in (root / "Dockerfile.mock-sas").read_text().splitlines():
+            if not line.startswith("COPY "):
+                continue
+            for source in shlex.split(line)[1:-1]:
+                path = root / source
+                self.assertTrue(path.exists(), source)
+                files.extend(path.rglob("*") if path.is_dir() else [path])
+        for path in files:
+            self.assertNotIn("certificates", path.parts)
+            self.assertNotIn(path.suffix.lower(), (".key", ".pem", ".cer", ".p12", ".pfx"))
+        self.assertIn(root / "deploy" / "mock-sas" / "generate_lab.py", files)
+        self.assertIn(root / "deploy" / "mock-sas" / "app.py", files)
+
+    def test_certificate_catalog_excludes_specific_materials_from_git_and_build(self):
+        root = Path(__file__).resolve().parents[2]
+        catalog = "deploy/mock-sas/lab-certificates"
+        self.assertIn(catalog + "/**", (root / ".gitignore").read_text().splitlines())
+        self.assertIn("!" + catalog + "/README.md", (root / ".gitignore").read_text().splitlines())
+        ignored = (root / ".dockerignore").read_text().splitlines()
+        for pattern in (catalog, "**/*.p12", "**/*.pfx"):
+            self.assertIn(pattern, ignored)
+        self.assertNotIn("PRIVATE KEY", (root / catalog / "README.md").read_text())
+
+    @unittest.skipUnless(os.name == "nt", "PowerShell Windows launcher test")
+    def test_windows_offline_package_allowlist_and_manifest(self):
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory(prefix="mock-sas-offline-package-") as temporary:
+            directory = Path(temporary)
+            fixture = directory / "fixture"
+            generate(fixture, [], ["127.0.0.1"])
+            ca = fixture / "signer/server-ca.pem"
+            fingerprint = next(iter(fingerprints(ca_certificates(ca))))
+            command = [
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                str(root / "deploy/mock-sas/Deploy-MockSas.ps1"),
+                "-PackageOnly", "-ServerIp", "127.0.0.1", "-ClientCa", str(ca),
+                "-ClientRootSha256", fingerprint, "-RadioTrustBundle", str(ca),
+                "-OutputDirectory", str(directory / "output"),
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("no SSH connection", result.stdout)
+            shutil.copyfile(fixture / "signer/cpi-key.pem", directory / "output/cpi-key.pem")
+            repeated = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(repeated.returncode, 0)
+            self.assertIn("Package output already exists", repeated.stderr)
+            self.assertNotIn("SeSecurityPrivilege", repeated.stderr)
+            with tarfile.open(next((directory / "output").glob("*.tar"))) as archive:
+                members = {item.name.removeprefix("./"): item for item in archive.getmembers() if item.isfile()}
+                self.assertIn("inputs/client-ca.pem", members)
+                self.assertIn("deploy/mock-sas/deploy_support.py", members)
+                self.assertIn("deploy/mock-sas/lab-certificates/README.md", members)
+                for name in members:
+                    if "certificates/" in name:
+                        self.assertEqual(name, "deploy/mock-sas/lab-certificates/README.md")
+                    self.assertNotIn("signer/", name)
+                    self.assertFalse(name.endswith((".key", ".p12", ".pfx")) or "private" in name.lower())
+                manifest = archive.extractfile(members["package.sha256"]).read().decode()
+                for line in manifest.splitlines():
+                    expected, name = line.split("  ", 1)
+                    self.assertEqual(hashlib.sha256(archive.extractfile(members[name]).read()).hexdigest(), expected)
+            command[command.index("-ClientRootSha256") + 1] = "0" * 64
+            failed = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("expected radio root", failed.stderr)
+            command[command.index("-ClientCa") + 1] = str(fixture / "signer/cpi-key.pem")
+            failed = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("not private keys", failed.stderr)
+            isolated = [
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                str(root / "deploy/mock-sas/Deploy-MockSas.ps1"),
+                "-PackageOnly", "-ServerIp", "127.0.0.1", "-AllowNoClientCertificate",
+                "-OutputDirectory", str(directory / "isolated-output"),
+            ]
+            result = subprocess.run(isolated, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("no SSH connection", result.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "PowerShell Windows launcher test")
+    def test_deployment_without_explicit_ssh_target_fails_before_any_remote_action(self):
+        command = [
+            "powershell", "-NoProfile", "-NonInteractive", "-File",
+            str(Path(__file__).with_name("Deploy-MockSas.ps1")),
+            "-ServerIp", "127.0.0.1", "-AllowNoClientCertificate",
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires explicit -SshTarget", result.stderr)
+        self.assertNotIn("PREFLIGHT", result.stdout)
+        self.assertNotIn("Upload", result.stdout)
 
 
+class CoexistenceTests(unittest.TestCase):
+    def run_preflight(self, mode="free", explicit=False, owned=False, port=8443, requested=8443,
+                      profile=DEFAULT_PROFILE, explicit_profile=False):
+        bash = (str(Path(os.environ["ProgramFiles"]) / "Git/bin/bash.exe")
+                if os.name == "nt" else shutil.which("bash"))
+        if not bash or not Path(bash).exists():
+            self.skipTest("Bash unavailable")
+        with tempfile.TemporaryDirectory(prefix="mock-sas-preflight-") as temporary:
+            directory = Path(temporary)
+            deployment = directory / "deployment"
+            identity = hashlib.sha256(deployment.as_posix().encode()).hexdigest()
+            if owned or mode == "unrelated-directory":
+                deployment.mkdir()
+                (deployment / "preserve.txt").write_text("unrelated data")
+            if owned:
+                (deployment / ".deployment-owner").write_text(identity + "\n")
+                (deployment / "deploy.env").write_text(f"SAS_HTTPS_PORT={port}\n")
+                if mode in ("stored-positive", "invalid-stored-profile", "public-profile"):
+                    (deployment / ".active-profile").write_text(
+                        ("INVALID" if mode == "invalid-stored-profile" else POSITIVE_PROFILE) + "\n")
+            if mode == "wrong-marker":
+                (deployment / ".deployment-owner").write_text("0" * 64 + "\n")
+            proc = directory / "proc" / "123"
+            proc.mkdir(parents=True)
+            arguments = ["docker-proxy", "-proto", "tcp", "-host-ip", "0.0.0.0",
+                         "-host-port", str(port), "-container-ip", "172.19.0.2",
+                         "-container-port", "8443"]
+            if mode == "wrong-proxy":
+                arguments[arguments.index("-container-ip") + 1] = "172.19.0.99"
+            (proc / "cmdline").write_bytes(b"\0".join(value.encode() for value in arguments) + b"\0")
+            source = Path(__file__).with_name("deploy-server.sh").read_text()
+            # Redirect only absolute deployment/proc paths into the fixture.
+            source = source.replace(
+                "^/(opt|srv)/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$", "^${TEST_DIRECTORY}$")
+            source = source.replace("/proc/$pid/cmdline", "$PROC_FIXTURE/$pid/cmdline")
+            script = directory / "payload.sh"
+            script.write_text(source, newline="\n")
+            wrapper = directory / "wrapper.sh"
+            wrapper.write_text(r"""
+set -euo pipefail
+uname() { echo Linux; }
+id() { echo 0; }
+flock() { echo 'Forbidden preflight write/lock operation' >&2; return 1; }
+realpath() {
+    if [[ $MODE == ancestor-symlink ]]; then echo /unrelated; else echo "$TEST_DIRECTORY"; fi
+}
+stat() {
+    if [[ $* == *%u* ]]; then
+        if [[ $MODE == foreign-directory-owner ]]; then echo 1000; else echo 0; fi
+    elif [[ $* == *active-profile* && $MODE == public-profile ]]; then echo 644
+    elif [[ $* == *deployment-owner* ]]; then
+        if [[ $MODE == public-marker ]]; then echo 644; else echo 600; fi
+    else echo 700; fi
+}
+docker() {
+    case "$*" in
+        info) return 0 ;;
+        "info --format "*) echo linux/amd64 ;;
+        "compose version") echo 'Docker Compose v2 fixture' ;;
+        "context show") echo default ;;
+        "context inspect "*) echo unix:///var/run/docker.sock ;;
+        "ps -a --format "*) echo 'foreign-service foreign-project 0.0.0.0:8080' ;;
+        "ps -aq --filter "*)
+            if [[ $MODE == project-collision ]]; then echo foreign; elif [[ $OWNED == true ]]; then echo own; fi ;;
+        "ps -q") echo foreign; if [[ $OWNED == true ]]; then echo own; fi ;;
+        *NetworkSettings.Ports*own)
+            printf '0.0.0.0|%s|8443/tcp\n' "$STORED_PORT" ;;
+        *NetworkSettings.Ports*foreign)
+            if [[ $MODE == docker-port ]]; then echo '0.0.0.0|8443|443/tcp'; else echo '0.0.0.0|8080|80/tcp'; fi ;;
+        *NetworkSettings.Networks*own) echo 172.19.0.2 ;;
+        *Config.Labels*own) printf 'winnf-mock-sas-%s|%s|%s\n' "${IDENTITY:0:12}" "$IDENTITY" "$PROFILE_LABEL" ;;
+        *Config.Labels*foreign) echo 'foreign-project|other|unrelated' ;;
+        *) echo "Forbidden/unexpected Docker operation: $*" >&2; return 1 ;;
+    esac
+}
+ss() {
+    if [[ $# == 2 ]]; then return; fi
+    case "$MODE:$*" in
+        ipv4:*ltnp4*8443*|all-busy:*ltnp4*)
+            echo 'LISTEN 0 128 0.0.0.0:8443 0.0.0.0:* users:(("unrelated",pid=999,fd=3))' ;;
+        ipv6:*ltnp6*8443*|own-with-foreign-ipv6:*ltnp6*8443*)
+            echo 'LISTEN 0 128 [::]:8443 [::]:* users:(("unrelated",pid=999,fd=3))' ;;
+        own-proxy:*ltnp4*8443*|wrong-proxy:*ltnp4*8443*)
+            echo 'LISTEN 0 128 0.0.0.0:8443 0.0.0.0:* users:(("docker-proxy",pid=123,fd=3))' ;;
+        own-with-foreign-ipv4:*ltnp4*8443*)
+            echo 'LISTEN 0 128 127.0.0.1:8443 0.0.0.0:* users:(("unrelated",pid=999,fd=3))' ;;
+    esac
+}
+source "$1" --preflight "$TEST_DIRECTORY" "$REQUESTED_PORT" "$EXPLICIT_PORT" "$REQUESTED_PROFILE" "$PROFILE_EXPLICIT"
+""", newline="\n")
+            before = {path.name: path.read_bytes() for path in deployment.glob("*")}
+            environment = dict(os.environ, MODE=mode, TEST_DIRECTORY=deployment.as_posix(),
+                               PROC_FIXTURE=(directory / "proc").as_posix(),
+                               OWNED=str(owned).lower(), STORED_PORT=str(port), IDENTITY=identity,
+                               PROFILE_LABEL=POSITIVE_PROFILE if mode == "own-positive" else DEFAULT_PROFILE,
+                               REQUESTED_PROFILE=profile, PROFILE_EXPLICIT=str(explicit_profile).lower(),
+                               EXPLICIT_PORT=str(explicit).lower(), REQUESTED_PORT=str(requested))
+            result = subprocess.run([bash, wrapper.as_posix(), script.as_posix()],
+                                    env=environment, capture_output=True, text=True, timeout=30)
+            self.assertEqual({path.name: path.read_bytes() for path in deployment.glob("*")}, before)
+            if not owned and mode != "unrelated-directory":
+                self.assertFalse(deployment.exists(), "Preflight must not create the deployment")
+            return result
+
+    def test_free_port_and_ipv4_ipv6_docker_nat_fallback(self):
+        for mode, port in [("free", 8443), ("ipv4", 8444), ("ipv6", 8444), ("docker-port", 8444)]:
+            with self.subTest(mode=mode):
+                result = self.run_preflight(mode)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f"SELECTED_HTTPS_PORT={port}", result.stdout)
+
+    def test_profile_changes_require_explicit_choice_and_do_not_adopt_foreign_containers(self):
+        result = self.run_preflight("own-positive", owned=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Profile changes require explicit", result.stderr)
+        for mode, profile in (("own-positive", POSITIVE_PROFILE),
+                              ("own-positive", DEFAULT_PROFILE), ("free", POSITIVE_PROFILE)):
+            result = self.run_preflight(mode, owned=True, profile=profile, explicit_profile=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.run_preflight("project-collision", owned=True,
+                                    profile=POSITIVE_PROFILE, explicit_profile=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrelated container", result.stderr)
+        result = self.run_preflight(profile=POSITIVE_PROFILE)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("selected explicitly", result.stderr)
+        result = self.run_preflight("stored-positive", owned=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Profile changes require explicit", result.stderr)
+        for mode in ("invalid-stored-profile", "public-profile"):
+            result = self.run_preflight(mode, owned=True, explicit_profile=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("profile", result.stderr.lower())
+
+    def test_explicit_or_exhausted_port_conflicts_do_not_displace_services(self):
+        for mode, explicit in [("docker-port", True), ("ipv6", True), ("all-busy", False)]:
+            with self.subTest(mode=mode):
+                result = self.run_preflight(mode, explicit=explicit,
+                                            requested=65535 if mode == "all-busy" else 8443)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("SELECTED_HTTPS_PORT=", result.stdout)
+
+    def test_owned_deployment_preserves_port_and_allows_only_its_proxy(self):
+        for mode, port in [("free", 9443), ("own-proxy", 8443)]:
+            with self.subTest(mode=mode):
+                result = self.run_preflight(mode, owned=True, port=port)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f"SELECTED_HTTPS_PORT={port}", result.stdout)
+        result = self.run_preflight(owned=True, explicit=True, port=9443)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Existing port is 9443", result.stderr)
+
+    def test_owned_binding_does_not_hide_foreign_listener_or_proxy(self):
+        for mode in ("own-with-foreign-ipv4", "own-with-foreign-ipv6", "wrong-proxy"):
+            with self.subTest(mode=mode):
+                result = self.run_preflight(mode, owned=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("overlaps another listener/container", result.stderr)
+
+    def test_unrelated_directory_project_and_marker_are_not_adopted(self):
+        for mode, owned in [("unrelated-directory", False), ("project-collision", False),
+                            ("project-collision", True), ("wrong-marker", True),
+                            ("public-marker", True), ("foreign-directory-owner", True),
+                            ("ancestor-symlink", False)]:
+            with self.subTest(mode=mode, owned=owned):
+                result = self.run_preflight(mode, owned=owned)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR:", result.stderr)
+                self.assertNotIn("SELECTED_HTTPS_PORT=", result.stdout)
 
 
+class DeploymentTests(unittest.TestCase):
+    def test_cpi_key_mismatch_is_rejected_without_writing_exports(self):
+        with tempfile.TemporaryDirectory(prefix="mock-sas-key-match-") as temporary:
+            directory = Path(temporary)
+            credentials = directory / "credentials"
+            generate(credentials, [], ["127.0.0.1"])
+            (credentials / "signer/cpi-key.pem").write_bytes((credentials / "runtime/server-key.pem").read_bytes())
+            before = {str(path.relative_to(credentials)): path.read_bytes()
+                      for path in credentials.rglob("*") if path.is_file()}
+            with self.assertRaisesRegex(ValueError, "Certificate/private key mismatch"):
+                prepare(credentials, directory / "settings.json", directory / "exports",
+                        "127.0.0.1", 8444, False)
+            self.assertFalse((directory / "settings.json").exists())
+            self.assertFalse((directory / "exports").exists())
+            self.assertEqual(before, {str(path.relative_to(credentials)): path.read_bytes()
+                                     for path in credentials.rglob("*") if path.is_file()})
+
+    def test_positive_prepare_preserves_credentials_settings_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory(prefix="mock-sas-positive-prepare-") as temporary:
+            directory = Path(temporary)
+            credentials = directory / "credentials"
+            generate(credentials, [], ["127.0.0.1"])
+            ca = credentials / "signer/server-ca.pem"
+            policy = json.loads(Path(__file__).with_name("lab-positive.example.json").read_text())
+            policy.update(labOnlyAcknowledged=True, rfContainmentAcknowledged=True)
+            path = directory / "policy.json"
+            path.write_text(json.dumps(policy))
+            settings = directory / "settings.json"
+            arguments = (credentials, settings, directory / "registration-exports", "127.0.0.1", 8444, True, ca)
+            prepare(*arguments)
+            before = {str(item.relative_to(credentials)): item.read_bytes()
+                      for item in credentials.rglob("*") if item.is_file()}
+            settings_before = settings.read_bytes()
+            arguments = (credentials, settings, directory / "positive-exports", "127.0.0.1", 8444, True, ca)
+            result = prepare(*arguments, profile=POSITIVE_PROFILE, lab_policy=path)
+            self.assertEqual(result, prepare(*arguments, profile=POSITIVE_PROFILE, lab_policy=path))
+            self.assertEqual(result["profile"], POSITIVE_PROFILE)
+            self.assertFalse(result["radioEndToEndVerified"])
+            self.assertEqual(settings.read_bytes(), settings_before)
+            self.assertEqual(before, {str(item.relative_to(credentials)): item.read_bytes()
+                                     for item in credentials.rglob("*") if item.is_file()})
+            changed = deepcopy(policy)
+            changed["maxEirpDbmMHz"] = 15
+            path.write_text(json.dumps(changed))
+            with self.assertRaisesRegex(ValueError, "Refusing to overwrite"):
+                prepare(*arguments, profile=POSITIVE_PROFILE, lab_policy=path)
+            self.assertEqual(settings.read_bytes(), settings_before)
+            with self.assertRaisesRegex(ValueError, "requires mTLS"):
+                prepare(credentials, settings, directory / "denied", "127.0.0.1", 8444,
+                        False, profile=POSITIVE_PROFILE, lab_policy=path)
+            self.assertFalse((directory / "denied").exists())
+    def test_probe_connects_to_configured_lan_address_not_loopback(self):
+        with patch("deploy_support.ssl.create_default_context"), \
+                patch("deploy_support.socket.create_connection",
+                      side_effect=RuntimeError("connection target checked")) as connect:
+            with self.assertRaisesRegex(RuntimeError, "connection target checked"):
+                probe_once("unused.pem", "192.0.2.10", 8444, True)
+            connect.assert_called_once_with(("192.0.2.10", 8444), timeout=5)
+
+    def test_unclassified_connection_reset_is_not_a_successful_mtls_probe(self):
+        with patch("deploy_support.probe_once", side_effect=ConnectionResetError("closed")), \
+                patch("deploy_support.time.monotonic", side_effect=[0, 2]):
+            with self.assertRaises(ConnectionResetError):
+                probe("unused.pem", "192.0.2.10", 8443, True, timeout=1)
+
+    def test_explicit_no_client_cert_https_health_and_wrong_mtls_policy(self):
+        with tempfile.TemporaryDirectory(prefix="mock-sas-deployment-tests-") as temporary:
+            directory = Path(temporary)
+            generate(directory, [], ["127.0.0.1"])
+            app = create_app(directory / "config/device.json", directory / "runtime/cpi-cert.pem")
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(str(directory / "runtime/server-cert.pem"),
+                                    str(directory / "runtime/server-key.pem"))
+            server = make_server("127.0.0.1", 0, app, ssl_context=context)
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                result = probe_once(directory / "signer/server-ca.pem", "127.0.0.1", server.server_port, False)
+                self.assertTrue(result["httpsApplicationHealthVerified"])
+                self.assertFalse(result["radioEndToEndVerified"])
+                with self.assertRaisesRegex(ValueError, "mTLS policy failure"):
+                    probe_once(directory / "signer/server-ca.pem", "127.0.0.1", server.server_port, True)
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+                server.server_close()
+                app.extensions["lab_workspace"].cleanup()
+
+    def test_prepare_preserves_keys_config_settings_and_radio_ca_bundle(self):
+        with tempfile.TemporaryDirectory(prefix="mock-sas-deployment-tests-") as temporary:
+            directory = Path(temporary)
+            credentials = directory / "credentials"
+            radio = directory / "radio-fixture"
+            generate(credentials, [], ["192.0.2.10"])
+            generate(radio, [], ["127.0.0.1"])
+            client_ca = radio / "signer/server-ca.pem"
+            fingerprint = next(iter(fingerprints(ca_certificates(client_ca))))
+            original_key = (credentials / "signer/cpi-key.pem").read_bytes()
+            original_device = (credentials / "config/device.json").read_bytes()
+            bundle = directory / "radio-bundle.pem"
+            bundle.write_bytes(client_ca.read_bytes() * 2)
+            settings = directory / "settings.json"
+            outputs = directory / "exports"
+            arguments = (credentials, settings, outputs, "192.0.2.10",
+                         8443, True, client_ca, fingerprint, bundle)
+            prepare(*arguments, fresh=True)
+            prepare(*arguments)
+            self.assertEqual((credentials / "signer/cpi-key.pem").read_bytes(), original_key)
+            self.assertEqual((credentials / "config/device.json").read_bytes(), original_device)
+            merged = ca_certificates(outputs / "radio-trust-bundle-with-lab.pem")
+            self.assertEqual(len(merged), 2)
+            self.assertIn(fingerprint, fingerprints(merged))
+            with self.assertRaisesRegex(ValueError, "does not include"):
+                prepare(credentials, directory / "other-settings.json", outputs,
+                        "127.0.0.2", 8443, True, client_ca)
+            # A changed setting is blocked before any credential mutation.
+            with self.assertRaisesRegex(ValueError, "settings differ"):
+                prepare(credentials, settings, outputs, "192.0.2.10", 9443, True, client_ca)
+            with self.assertRaisesRegex(ValueError, "trust replacement"):
+                prepare(credentials, settings, outputs, "192.0.2.10", 8443, True,
+                        credentials / "signer/server-ca.pem")
+
+    def test_wrong_san_and_missing_or_wrong_client_ca_are_blocked(self):
+        with tempfile.TemporaryDirectory(prefix="mock-sas-deployment-tests-") as temporary:
+            directory = Path(temporary)
+            credentials = directory / "credentials"
+            generate(credentials, [], ["127.0.0.1"])
+            arguments = (credentials, directory / "settings.json", directory / "exports")
+            with self.assertRaisesRegex(ValueError, "does not include"):
+                prepare(*arguments, "192.0.2.10", 8443, False)
+            with self.assertRaisesRegex(ValueError, "real radio client CA"):
+                prepare(*arguments, "127.0.0.1", 8443, True)
+            with self.assertRaisesRegex(ValueError, "expected radio root"):
+                prepare(*arguments, "127.0.0.1", 8443, True,
+                        credentials / "signer/server-ca.pem", "0" * 64)
 
 
 if __name__ == "__main__":
