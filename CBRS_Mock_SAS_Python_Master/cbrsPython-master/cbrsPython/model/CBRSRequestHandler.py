@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# Modified in this fork for Python 3 and LAB CPI/schema compatibility.
 import model.Utils.JsonComparisonUtils as jsonComparer 
 import model.Utils.Consts as consts
 import datetime as DT
@@ -23,8 +24,8 @@ import json
 import jsonschema
 import jwt
 from cryptography.x509 import load_pem_x509_certificate
-from cryptography.hazmat.backends import default_backend
-import base64
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+import re
 
 
 class CBRSRequestHandler(object):
@@ -42,6 +43,7 @@ class CBRSRequestHandler(object):
         self.secondLastHeartBeatTime            = None
         self.grantBeforeHeartBeat               = False
         self.validationErrorAccuredInEngine     = False
+        self.validationErrorFields             = []
         self.isLastStepInCSV                    = False
         self.numberOfStep                       = 0
         self.numberOfHearbeatRequests           = 0
@@ -69,6 +71,7 @@ class CBRSRequestHandler(object):
         self.set_Current_Json_Steps(testDefinition, EnviormentConfFile, dirPath)         
         self.transmitExpireTime                 = ''
         self.grantExpireTime                    = ''
+        self.verifiedEirpCapability              = None
     
     def set_Current_Json_Steps(self,testDefinition,confFile,dirPath):
         cbsdFoundInJsons = False
@@ -128,7 +131,7 @@ class CBRSRequestHandler(object):
                     return self.returnSpectInquieryInCaseOfRepeatsAllowedAlwaysValidationSucceed(jsonFile,httpRequest)
                 except Exception as e:
                     self.validationErrorAccuredInEngine = True  
-                    raise IOError (str(e))   
+                    raise IOError (str(e))
         
         if(typeOfCalling==consts.HEART_BEAT_SUFFIX_HTTP): 
 
@@ -214,6 +217,7 @@ class CBRSRequestHandler(object):
                     
         except Exception as e:
             self.validationErrorAccuredInEngine = True  
+            self.validationErrorFields = getattr(e, "parameters", [])
             raise IOError (str(e))
         # Check CPI data in registration message, if present...                                                                                                              
         if(typeOfCalling == consts.REGISTRATION_SUFFIX_HTTP):
@@ -221,14 +225,17 @@ class CBRSRequestHandler(object):
                 if 'installationParam' in httpRequest:
                     self.loggerHandler.print_to_Logs_Files("ERROR: cpiSignatureData and installationParam exist in same registration message ", True)
                     self.validationErrorAccuredInEngine = True
+                    self.validationErrorFields = ["cpiSignatureData", "installationParam"]
                     raise IOError ("failure -- cpiSignatureData and installationParam exist in same registration message")
                 elif 'cbsdCategory' in httpRequest:
-                    if self.checkCpiSignedData(dict(httpRequest['cpiSignatureData']), httpRequest['cbsdCategory']) == False:
+                    if self.checkCpiSignedData(dict(httpRequest['cpiSignatureData']), httpRequest['cbsdCategory'], httpRequest) == False:
                         self.validationErrorAccuredInEngine = True
+                        self.validationErrorFields = ["cpiSignatureData"]
                         raise IOError ("cpiSignature check failed")
                 else:
                     self.loggerHandler.print_to_Logs_Files("cbsdCategory missing, can't check cpi data against json schema", True)
                     self.validationErrorAccuredInEngine = True
+                    self.validationErrorFields = ["cbsdCategory"]
                     raise IOError ("cpiSignature check failed -- no cbsdCategory in Reg request")
                     
         if(typeOfCalling==consts.GRANT_SUFFIX_HTTP):
@@ -280,11 +287,8 @@ class CBRSRequestHandler(object):
             self.assertion.compare_Json_Req(httpRequest,expectedJsonFileName,typeOfCalling+consts.REQUEST_NODE_NAME,keys)                  
     
     def parse_Json_To_Dic_By_File_Name(self,jsonFileName,nodeName,confFile):
-        try:
-            return jsonComparer.get_Node_Of_Json_Parsed(jsonFileName,nodeName,confFile,self.dirPath)
-        except Exception as e:
-            if e.message == "node not exists":
-                return consts.SUFFIX_NOT_EXISTS_IN_EXPECTED_JSON_FILE
+        parsed = jsonComparer.Get_Json_After_Parse_To_Dic(jsonFileName, confFile, self.dirPath)
+        return parsed.get(nodeName)
     
     def get_Expected_Json_File_Name(self,numberOfStep = None):
         if(self.expectedRelBeforeDeragistration):
@@ -321,7 +325,7 @@ class CBRSRequestHandler(object):
         jsonAfterParse = self.parse_Json_To_Dic_By_File_Name(self.get_Expected_Json_File_Name(),consts.RESPONSE_NODE_NAME,self.enviormentConfFile)
         
         if len(jsonAfterParse) > 1:
-            for item in jsonAfterParse.iteritems():
+            for item in list(jsonAfterParse.items()):
                 if item[0] != typeOfCalling+consts.RESPONSE_NODE_NAME.title():
                     del jsonAfterParse[item[0]]
         specificRespJson = jsonAfterParse[typeOfCalling+consts.RESPONSE_NODE_NAME.title()][0]
@@ -497,57 +501,70 @@ class CBRSRequestHandler(object):
         else:
             pass
         
-    def checkCpiSignedData(self,cpiSigData, cbsdCat):
+    def checkCpiSignedData(self,cpiSigData, cbsdCat, registrationRequest=None):
         """ Given cpiSignatureData from registration request message, verifies the signature on data,
             and checks data with jsonSchema for cpiSignatureData
         """
         self.loggerHandler.print_to_Logs_Files("Registration message contains cpiSignatureData", False)
-        decodedHeader = json.loads(base64.standard_b64decode(cpiSigData['protectedHeader']))
-        self.loggerHandler.print_to_Logs_Files("protectedHeader = "+str(decodedHeader), False)
-
-        encoded_cpi_data = cpiSigData['protectedHeader'] \
-                        + '.' + cpiSigData['encodedCpiSignedData'] \
-                        + '.' + cpiSigData['digitalSignature']
-        unverified_cpi_payload = jwt.decode(encoded_cpi_data, verify=False)     ### This is data without signature check
-        self.loggerHandler.print_to_Logs_Files("encodedCpiSignedData contents = "+json.dumps(unverified_cpi_payload, indent=4), False)
+        fields = ('protectedHeader', 'encodedCpiSignedData', 'digitalSignature')
+        if set(cpiSigData) != set(fields) or any(
+                not isinstance(cpiSigData.get(field), str) or
+                re.fullmatch(r'[A-Za-z0-9_-]+', cpiSigData[field]) is None
+                for field in fields):
+            self.loggerHandler.print_to_Logs_Files("Invalid CPI JWS segments", True)
+            return False
+        encoded_cpi_data = '.'.join(cpiSigData[field] for field in fields)
         try:
             cpi_cert_filename = os.path.normpath(os.path.join(str(self.dirPath), str(self.enviormentConfFile.getElementsByTagName('cpiCert')[0].firstChild.data)))
-            cpi_cert = open(cpi_cert_filename, 'r').read()
-            cpi_cert_obj = load_pem_x509_certificate(cpi_cert, default_backend())
+            with open(cpi_cert_filename, 'rb') as file:
+                cpi_cert_obj = load_pem_x509_certificate(file.read())
             cpi_public_key = cpi_cert_obj.public_key()
-        except:
-            self.loggerHandler.print_to_Logs_Files('Error in loading CPI certificate file', True)
-            return False
+        except (OSError, ValueError) as error:
+            self.loggerHandler.print_to_Logs_Files('Error loading CPI certificate: ' + str(error), True)
+            raise
         try:
+            header = jwt.get_unverified_header(encoded_cpi_data)
+            if header.get('crit') or header.get('b64') is False:
+                raise jwt.InvalidTokenError("Unsupported JWS header extension")
+            if header.get('alg') == 'RS256':
+                if not isinstance(cpi_public_key, rsa.RSAPublicKey) or cpi_public_key.key_size < 2048:
+                    raise jwt.InvalidKeyError("RS256 requires an RSA key of at least 2048 bits")
+            elif header.get('alg') == 'ES256':
+                if not isinstance(cpi_public_key, ec.EllipticCurvePublicKey) or not isinstance(cpi_public_key.curve, ec.SECP256R1):
+                    raise jwt.InvalidKeyError("ES256 requires a P-256 key")
             verified_cpi_payload = jwt.decode(encoded_cpi_data, cpi_public_key, algorithms=consts.CPI_SIGNATURE_VALID_TYPES)
             self.loggerHandler.print_to_Logs_Files("verified signature on cpiSignatureData", False)
-        except (jwt.exceptions.InvalidTokenError, jwt.exceptions.DecodeError, jwt.exceptions.InvalidKeyError, jwt.exceptions.InvalidAlgorithmError) as e:
+        except (jwt.exceptions.InvalidTokenError, jwt.exceptions.InvalidKeyError) as e:
             self.loggerHandler.print_to_Logs_Files("cpiSignatureData signature error: " +str(e), True)
-            return False
-        except:
-            self.loggerHandler.print_to_Logs_Files("cpiSignatureData signature error: other error", True)
             return False
 
         schema_filename = os.path.normpath(os.path.join(str(self.dirPath), str(self.enviormentConfFile.getElementsByTagName('jsonsRepoPath')[0].firstChild.data),'OptionalParams', 'cpiSignatureDataSchema.json'))
-        try:
-            file = open(schema_filename, 'r')
+        with open(schema_filename, 'r') as file:
             cpi_schema = json.load(file)
-        except:
-            self.loggerHandler.print_to_Logs_Files("Error opening cpiSignatureDataSchema", True)
-            return False
 #        If Cat A, then some installationParams must be removed from required list
         if cbsdCat == 'A':
             self.loggerHandler.print_to_Logs_Files("cbsdCategory= 'A', removing optional param from cpi_schema", False)
             for catAparamOptional in consts.CPI_INSTALLPARAM_CATA_OPTIONAL:
                 cpi_schema['definitions']['installationParam']['required'].remove(catAparamOptional)        
         try:
-            x = jsonschema.validate(verified_cpi_payload, cpi_schema)
+            json.dumps(verified_cpi_payload, allow_nan=False)
+        except ValueError:
+            self.loggerHandler.print_to_Logs_Files("Signed CPI payload contains nonfinite numbers", True)
+            return False
+        try:
+            jsonschema.validate(verified_cpi_payload, cpi_schema)
             self.loggerHandler.print_to_Logs_Files("cpiSignatureData data successfully validated against jsonschema ", False)
         except jsonschema.ValidationError as e:
-            self.loggerHandler.print_to_Logs_Files('cpiSignature decoded json schema validation error = '+ e.message, True)
+            message = 'cpiSignature decoded json schema rejected at ' + e.json_path + ' (' + e.validator + ')'
+            if e.validator == 'required' and isinstance(e.instance, dict):
+                missing = [name for name in e.validator_value if name not in e.instance]
+                message += '; missing required properties: ' + ', '.join(missing)
+            self.loggerHandler.print_to_Logs_Files(message, True)
             return False
-        except:
-            self.loggerHandler.print_to_Logs_Files('jsonschema validate fail', False)
-            return False
-            
+        if registrationRequest is not None:
+            for field in ('fccId', 'cbsdSerialNumber'):
+                if verified_cpi_payload[field] != registrationRequest.get(field):
+                    self.loggerHandler.print_to_Logs_Files("Signed CPI identity differs from registration: " + field, True)
+                    return False
+        self.verifiedEirpCapability = verified_cpi_payload['installationParam'].get('eirpCapability')
         return True

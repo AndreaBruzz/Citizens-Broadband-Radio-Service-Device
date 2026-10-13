@@ -4,7 +4,7 @@
 
 {
   "$schema": "http://json-schema.org/draft-04/schema#",
-  "description": "Registration parameters provided for a CBSD",
+  "description": "Modified in this fork: optional/empty measurement capability and correctly scoped CPI references.",
   "type": "object",
   
   "properties": {
@@ -25,11 +25,11 @@
     "measCapability": { "type": "array",
                         "description": "List of supported sensing capabilities of the device",
                         "items": { "enum": [ "RECEIVED_POWER_WITHOUT_GRANT", "RECEIVED_POWER_WITH_GRANT" ],
-                        "description": "Measurement capabilities of the CBSD." },
+                        "description": "Measurement capabilities of the CBSD." } },
     "cpiSignatureData":{"$ref": "#/cpiSignatureData"},
     "cbsdInfo": { "$ref": "#/cbsdInfo" },
-    "installationParam": { "$ref": "#/installationParam" }        
-                      },
+    "installationParam": { "$ref": "#/installationParam" }
+  },
                       
   "cbsdInfo": {
     "type": "object",
@@ -123,6 +123,5 @@
                       "description": "If an external antenna is used, the model of the antenna is optionally provided in this field." }
   				}
   			}
-  		}
   	}
 ]}
